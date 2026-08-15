@@ -389,7 +389,7 @@ def run_agent():
         raw = search_item(item_type)
         
         if raw:
-            filtered = raw  # Temporarily skip Claude filtering
+            filtered = filter_results_with_claude(item_type, raw)
             print(f"  Found {len(filtered)} matches")
             results[item_type] = filtered
         else:
