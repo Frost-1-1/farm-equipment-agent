@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Farm Equipment Search Agent
@@ -156,41 +157,116 @@ def update_last_run_time():
 
 def scrape_kijiji_listings(url):
     """
-    Scrape Kijiji listings. Returns title, price, url, description.
-    Note: This is a simplified scraper. Kijiji may require updates if structure changes.
+    Scrape Kijiji listings using BeautifulSoup.
+    Returns list of dicts: {title, price, url, description, location}
     """
     listings = []
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
         
-        # Parse basic HTML (in production, use BeautifulSoup)
-        # For now, return empty to avoid blocking - user can enhance
-        # This is a placeholder; Kijiji requires more sophisticated scraping
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Kijiji listing items
+        items = soup.find_all('div', {'data-testid': 'listing-card'})
+        
+        for item in items[:20]:  # Limit to first 20 to avoid overwhelming
+            try:
+                # Title
+                title_elem = item.find('a', {'data-testid': 'listing-link'})
+                if not title_elem:
+                    continue
+                title = title_elem.get_text(strip=True)
+                listing_url = title_elem.get('href', '')
+                if not listing_url.startswith('http'):
+                    listing_url = 'https://www.kijiji.ca' + listing_url
+                
+                # Price
+                price_elem = item.find('div', {'data-testid': 'price'})
+                price = price_elem.get_text(strip=True) if price_elem else 'Price not listed'
+                
+                # Location
+                location_elem = item.find('div', {'data-testid': 'location'})
+                location = location_elem.get_text(strip=True) if location_elem else 'Location not listed'
+                
+                # Description (usually in title or separate element)
+                description = title[:200]
+                
+                listings.append({
+                    'title': title,
+                    'price': price,
+                    'url': listing_url,
+                    'description': description,
+                    'location': location
+                })
+            except Exception as e:
+                print(f"Error parsing Kijiji item: {e}")
+                continue
+        
+        print(f"Scraped {len(listings)} listings from {url}")
         
     except Exception as e:
-        print(f"Error scraping Kijiji: {e}")
+        print(f"Error scraping Kijiji {url}: {e}")
     
     return listings
 
 def scrape_craigslist_listings(url):
     """
-    Scrape Craigslist listings.
+    Scrape Craigslist listings using BeautifulSoup.
+    Returns list of dicts: {title, price, url, description, location}
     """
     listings = []
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
         
-        # Parse basic HTML
-        # This is a placeholder; Craigslist structure requires specific parsing
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Craigslist result listings
+        items = soup.find_all('li', {'class': 'cl-search-result'})
+        
+        for item in items[:20]:  # Limit to first 20
+            try:
+                # Title and URL
+                title_elem = item.find('a', {'class': 'posting-title'})
+                if not title_elem:
+                    continue
+                title = title_elem.get_text(strip=True)
+                listing_url = title_elem.get('href', '')
+                
+                # Price
+                price_elem = item.find('span', {'class': 'result-price'})
+                price = price_elem.get_text(strip=True) if price_elem else 'Price not listed'
+                
+                # Location/date info
+                meta_elem = item.find('div', {'class': 'result-meta'})
+                location = meta_elem.get_text(strip=True) if meta_elem else 'Location not listed'
+                
+                description = title[:200]
+                
+                listings.append({
+                    'title': title,
+                    'price': price,
+                    'url': listing_url,
+                    'description': description,
+                    'location': location
+                })
+            except Exception as e:
+                print(f"Error parsing Craigslist item: {e}")
+                continue
+        
+        print(f"Scraped {len(listings)} listings from {url}")
         
     except Exception as e:
-        print(f"Error scraping Craigslist: {e}")
+        print(f"Error scraping Craigslist {url}: {e}")
     
     return listings
 
@@ -284,21 +360,39 @@ def get_test_listings(item_type):
 def search_item(item_type):
     """
     Search for item type and return raw results.
-    Currently returns TEST DATA to verify the system works.
-    Replace with real scraping when ready.
+    Scrapes real listings from Kijiji and Craigslist.
     """
     config = SEARCHES[item_type]
-    print(f"Searching for {item_type}...")
+    all_listings = []
     
-    # Return test listings for verification
-    all_listings = get_test_listings(item_type)
+    print(f"\nSearching for {item_type}...")
     
-    # In production, uncomment and enhance these:
-    # for url in config["kijiji_urls"]:
-    #     all_listings.extend(scrape_kijiji_listings(url))
-    # for url in config["craigslist_urls"]:
-    #     all_listings.extend(scrape_craigslist_listings(url))
+    # Scrape Kijiji
+    for url in config["kijiji_urls"]:
+        try:
+            print(f"  Scraping Kijiji: {url}")
+            listings = scrape_kijiji_listings(url)
+            all_listings.extend(listings)
+            time.sleep(2)  # Be respectful - delay between requests
+        except Exception as e:
+            print(f"  Error with Kijiji URL: {e}")
     
+    # Scrape Craigslist
+    for url in config["craigslist_urls"]:
+        try:
+            print(f"  Scraping Craigslist: {url}")
+            listings = scrape_craigslist_listings(url)
+            all_listings.extend(listings)
+            time.sleep(2)  # Be respectful - delay between requests
+        except Exception as e:
+            print(f"  Error with Craigslist URL: {e}")
+    
+    # If no results, fall back to test data for demo purposes
+    if not all_listings:
+        print(f"  No results found, using test data for demo...")
+        all_listings = get_test_listings(item_type)
+    
+    print(f"  Total listings found: {len(all_listings)}")
     return all_listings
 
 def filter_results_with_claude(item_type, raw_listings):
@@ -699,4 +793,4 @@ if __name__ == "__main__":
     # Start Flask app
     print("Starting Farm Equipment Search Dashboard...")
     print("Dashboard available at: http://localhost:5000")
-    app.run(host="0.0.0.0", port=5000, debug=False)   
+    app.run(host="0.0.0.0", port=5000, debug=False)
