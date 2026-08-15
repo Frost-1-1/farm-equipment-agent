@@ -8,6 +8,7 @@ Runs daily at 6 AM
 
 import os
 import json
+import re
 import feedparser
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string
@@ -77,7 +78,6 @@ def scrape_rss_feed(url):
                 # Clean description (remove HTML tags)
                 clean_desc = description.replace('<br>', ' ').replace('<p>', '').replace('</p>', '')
                 # Remove HTML tags
-                import re
                 clean_desc = re.sub('<[^<]+?>', '', clean_desc).strip()
                 clean_desc = clean_desc[:200]  # First 200 chars
                 
