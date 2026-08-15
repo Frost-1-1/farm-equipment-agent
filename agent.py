@@ -194,15 +194,104 @@ def scrape_craigslist_listings(url):
     
     return listings
 
+def get_test_listings(item_type):
+    """
+    Return sample test listings for verification.
+    Remove this when real web scraping is implemented.
+    """
+    test_data = {
+        "tractor": [
+            {
+                "title": "Kubota B2410HSD 28 HP Tractor with Front Loader",
+                "price": "$16,500 CAD",
+                "url": "https://www.kijiji.ca/v-example-1",
+                "description": "2015 Kubota B2410HSD compact tractor, 28 HP, hydrostatic transmission, front loader attachment, rear hitch, excellent condition, low hours. Located in Lower Mainland BC.",
+                "location": "Chilliwack, BC"
+            },
+            {
+                "title": "John Deere 35 HP Tractor Loader Backhoe",
+                "price": "$18,900 CAD",
+                "url": "https://www.kijiji.ca/v-example-2",
+                "description": "2018 John Deere tractor, 35 HP, front loader, backhoe, hydrostatic transmission, well maintained, ready to work. Currently in Alberta.",
+                "location": "Calgary, AB"
+            },
+            {
+                "title": "Case IH 30 HP Tractor with Loader - Needs Work",
+                "price": "$22,000 CAD",
+                "url": "https://www.kijiji.ca/v-example-3",
+                "description": "Case IH 30 HP tractor with loader, transmission issues, parts machine",
+                "location": "Edmonton, AB"
+            }
+        ],
+        "bunk_trailer": [
+            {
+                "title": "2022 38' Bunk House Trailer - Excellent Condition",
+                "price": "$65,000 CAD",
+                "url": "https://www.kijiji.ca/v-example-4",
+                "description": "2022 bunk house trailer, 38 feet, sleeps 8, full kitchen, outdoor kitchen, master bedroom slide, all bunks have slides. Excellent condition, minimal use.",
+                "location": "Kamloops, BC"
+            },
+            {
+                "title": "2021 36' Bunkhouse Trailer",
+                "price": "$58,500 CAD",
+                "url": "https://www.kijiji.ca/v-example-5",
+                "description": "2021 36-foot bunk house trailer, bunks with slides, full kitchen setup, great for crews or families. Very well maintained.",
+                "location": "Prince George, BC"
+            },
+            {
+                "title": "2019 40' Bunk Trailer - Needs Repairs",
+                "price": "$45,000 CAD",
+                "url": "https://www.kijiji.ca/v-example-6",
+                "description": "2019 40-foot bunk trailer, one slide needs fixing, old kitchen",
+                "location": "Red Deer, AB"
+            }
+        ],
+        "scissor_hoist": [
+            {
+                "title": "Used Mobile Scissor Lift 7500 lb Capacity 120V",
+                "price": "$3,200 CAD",
+                "url": "https://www.kijiji.ca/v-example-7",
+                "description": "Portable scissor lift, 7500 lb capacity, runs on 120V 20A outlet, electric powered, good working condition. Perfect for truck or car lifting.",
+                "location": "Vancouver, BC"
+            },
+            {
+                "title": "Industrial Scissor Hoist 7000 lb 240V",
+                "price": "$2,800 CAD",
+                "url": "https://www.kijiji.ca/v-example-8",
+                "description": "Heavy duty scissor hoist, 7000 lb capacity, 240V welding outlet compatible, used but functional. Serious buyers only.",
+                "location": "Burnaby, BC"
+            }
+        ],
+        "two_post_hoist": [
+            {
+                "title": "8-Post Hydraulic Vehicle Lift with Truck Extensions",
+                "price": "$4,500 CAD",
+                "url": "https://www.kijiji.ca/v-example-9",
+                "description": "Used 2-post symmetric lift, 10,000 lb capacity, includes heavy-duty truck extensions, floor plate anchoring, works great.",
+                "location": "Surrey, BC"
+            },
+            {
+                "title": "12,000 lb Capacity 2-Post Lift - Asymmetric",
+                "price": "$5,200 CAD",
+                "url": "https://www.kijiji.ca/v-example-10",
+                "description": "Professional 2-post lift, 12,000 lb capacity, includes pickup truck extensions, floor mounted, industrial grade.",
+                "location": "Abbotsford, BC"
+            }
+        ]
+    }
+    return test_data.get(item_type, [])
+
 def search_item(item_type):
     """
     Search for item type and return raw results.
-    For now, returns example format. In production, would scrape actual listings.
+    Currently returns TEST DATA to verify the system works.
+    Replace with real scraping when ready.
     """
     config = SEARCHES[item_type]
-    all_listings = []
-    
     print(f"Searching for {item_type}...")
+    
+    # Return test listings for verification
+    all_listings = get_test_listings(item_type)
     
     # In production, uncomment and enhance these:
     # for url in config["kijiji_urls"]:
@@ -210,7 +299,6 @@ def search_item(item_type):
     # for url in config["craigslist_urls"]:
     #     all_listings.extend(scrape_craigslist_listings(url))
     
-    # For now, return structured format so Claude can filter
     return all_listings
 
 def filter_results_with_claude(item_type, raw_listings):
@@ -359,6 +447,31 @@ DASHBOARD_HTML = """
     </style>
 </head>
 <body>
+    <script>
+        function runNow() {
+            const btn = event.target;
+            const statusEl = document.getElementById('runStatus');
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ Running...';
+            statusEl.textContent = '';
+            
+            fetch('/api/run-now', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            })
+            .then(r => r.json())
+            .then(data => {
+                statusEl.textContent = '✓ Search complete! Refreshing...';
+                setTimeout(() => location.reload(), 2000);
+            })
+            .catch(err => {
+                statusEl.textContent = '✗ Error: ' + err.message;
+                btn.disabled = false;
+                btn.textContent = '▶ Run Search Now';
+            });
+        }
+    </script>
     <div class="container">
         <div class="header">
             <h1>🚜 Farm Equipment Search Dashboard</h1>
@@ -376,7 +489,10 @@ DASHBOARD_HTML = """
         </div>
 
         <div class="refresh-note">
-            ℹ️ Agent runs automatically once per day. Check back tomorrow for new results. <strong>Manual checks on Facebook Marketplace & Groups recommended.</strong>
+            ℹ️ Agent runs automatically once per day at 6 AM UTC. <strong>Or click below to run now:</strong>
+            <br><button onclick="runNow()" style="margin-top: 10px; padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">▶ Run Search Now</button>
+            <span id="runStatus" style="margin-left: 10px; font-size: 13px;"></span>
+            <br><br>Manual checks on Facebook Marketplace & Groups recommended.
         </div>
 
         <!-- TRACTORS -->
@@ -538,6 +654,21 @@ def dashboard():
 def api_results():
     """API endpoint to get raw results as JSON."""
     return load_results()
+
+@app.route('/api/run-now', methods=['POST'])
+def run_now():
+    """Manually trigger agent run."""
+    print("\n" + "="*60)
+    print("Manual run triggered from dashboard")
+    print("="*60 + "\n")
+    
+    run_agent()
+    
+    return {
+        "status": "success",
+        "message": "Agent run completed",
+        "timestamp": datetime.now().isoformat()
+    }
 
 # ============================================================================
 # MAIN
