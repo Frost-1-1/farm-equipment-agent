@@ -1,42 +1,102 @@
 #!/usr/bin/env python3
 """
-Farm Equipment Search Agent - SIMPLE VERSION
-Shows test listings on dashboard
+Craigslist RSS Scraper - Real Equipment Listings
+Pulls actual listings from Craigslist RSS feeds
+Shows real prices and links
 Runs daily at 6 AM
-Has Run Now button
-No Claude filtering. No web scraping. Just works.
 """
 
 import os
 import json
+import feedparser
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string
 from threading import Thread
 import time
 
-# Configuration
 RESULTS_FILE = "farm_results.json"
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "not-needed-for-this-version")
 
-# Test data
-TEST_LISTINGS = {
+# Craigslist RSS URLs for equipment searches
+CRAIGSLIST_FEEDS = {
     "tractor": [
-        {"title": "Kubota B2410HSD 28 HP Tractor with Front Loader", "price": "$16,500 CAD", "location": "Chilliwack, BC", "description": "2015 Kubota compact tractor, 28 HP, hydrostatic transmission, front loader, low hours."},
-        {"title": "John Deere 35 HP Tractor with Loader", "price": "$18,900 CAD", "location": "Calgary, AB", "description": "2018 John Deere, 35 HP, front loader, backhoe, hydrostatic, well maintained."},
+        "https://vancouver.craigslist.org/search/gra?query=tractor+front+loader&format=rss",
+        "https://calgary.craigslist.org/search/gra?query=tractor+front+loader&format=rss",
+        "https://edmonton.craigslist.org/search/gra?query=tractor+front+loader&format=rss",
     ],
     "bunk_trailer": [
-        {"title": "2022 38' Bunk House Trailer - Excellent", "price": "$65,000 CAD", "location": "Kamloops, BC", "description": "2022 bunk house, 38 ft, sleeps 8, full kitchen, master bedroom slide, outdoor kitchen."},
-        {"title": "2021 36' Bunkhouse Trailer", "price": "$58,500 CAD", "location": "Prince George, BC", "description": "2021 36-foot, bunks with slides, full kitchen, excellent condition."},
+        "https://vancouver.craigslist.org/search/rva?query=bunk+house+trailer&format=rss",
+        "https://calgary.craigslist.org/search/rva?query=bunk+house+trailer&format=rss",
+        "https://edmonton.craigslist.org/search/rva?query=bunk+house+trailer&format=rss",
     ],
     "scissor_hoist": [
-        {"title": "Used Mobile Scissor Lift 7500 lb", "price": "$3,200 CAD", "location": "Vancouver, BC", "description": "Portable scissor lift, 7500 lb capacity, 120V 20A, electric powered, good condition."},
-        {"title": "Industrial Scissor Hoist 7000 lb 240V", "price": "$2,800 CAD", "location": "Burnaby, BC", "description": "Heavy duty scissor hoist, 7000 lb capacity, 240V welding outlet compatible."},
+        "https://vancouver.craigslist.org/search/tls?query=scissor+hoist&format=rss",
+        "https://calgary.craigslist.org/search/tls?query=scissor+hoist&format=rss",
+        "https://edmonton.craigslist.org/search/tls?query=scissor+hoist&format=rss",
     ],
     "two_post_hoist": [
-        {"title": "2-Post Hydraulic Vehicle Lift with Truck Extensions", "price": "$4,500 CAD", "location": "Surrey, BC", "description": "10,000 lb capacity, heavy-duty truck extensions, floor plate anchoring."},
-        {"title": "12,000 lb 2-Post Lift - Professional Grade", "price": "$5,200 CAD", "location": "Abbotsford, BC", "description": "Professional 2-post lift, 12,000 lb capacity, pickup truck extensions, industrial."},
+        "https://vancouver.craigslist.org/search/tls?query=2+post+hoist&format=rss",
+        "https://calgary.craigslist.org/search/tls?query=2+post+hoist&format=rss",
+        "https://edmonton.craigslist.org/search/tls?query=2+post+hoist&format=rss",
     ]
 }
+
+# ============================================================================
+# RSS SCRAPING
+# ============================================================================
+
+def scrape_rss_feed(url):
+    """Parse Craigslist RSS feed and extract listings"""
+    listings = []
+    try:
+        feed = feedparser.parse(url)
+        
+        for entry in feed.entries[:15]:  # Get up to 15 listings per feed
+            try:
+                title = entry.get('title', 'No title')
+                link = entry.get('link', '')
+                description = entry.get('description', '')
+                
+                # Extract price from description (usually in format $XXX)
+                price = "Price not listed"
+                if '$' in description:
+                    # Get the price string
+                    parts = description.split('$')
+                    if len(parts) > 1:
+                        price_part = parts[1].split('<')[0].strip()
+                        price = f"${price_part}"
+                
+                # Extract location from description (usually at end)
+                location = "Craigslist"
+                if url.find('vancouver') > 0:
+                    location = "Vancouver, BC"
+                elif url.find('calgary') > 0:
+                    location = "Calgary, AB"
+                elif url.find('edmonton') > 0:
+                    location = "Edmonton, AB"
+                
+                # Clean description (remove HTML tags)
+                clean_desc = description.replace('<br>', ' ').replace('<p>', '').replace('</p>', '')
+                # Remove HTML tags
+                import re
+                clean_desc = re.sub('<[^<]+?>', '', clean_desc).strip()
+                clean_desc = clean_desc[:200]  # First 200 chars
+                
+                listings.append({
+                    'title': title,
+                    'price': price,
+                    'url': link,
+                    'description': clean_desc,
+                    'location': location
+                })
+            except Exception as e:
+                print(f"  Error parsing entry: {e}")
+                continue
+        
+        print(f"  Found {len(listings)} listings from {url.split('?')[0].split('/')[-1]}")
+    except Exception as e:
+        print(f"  Error fetching RSS: {e}")
+    
+    return listings
 
 # ============================================================================
 # FILE OPERATIONS
@@ -53,21 +113,30 @@ def save_results(data):
         json.dump(data, f, indent=2, default=str)
 
 def run_agent():
-    """Run the search - populate with test data"""
+    """Scrape all Craigslist feeds"""
     print(f"\n{'='*60}")
-    print(f"Agent run at {datetime.now()}")
+    print(f"Craigslist Scraper - Run at {datetime.now()}")
     print(f"{'='*60}\n")
     
     results = load_results()
     results["last_updated"] = datetime.now().isoformat()
     
-    # Load test data
-    for item_type, listings in TEST_LISTINGS.items():
-        results[item_type] = listings
-        print(f"  {item_type}: {len(listings)} listings")
+    for item_type, feeds in CRAIGSLIST_FEEDS.items():
+        print(f"\nScraping {item_type}...")
+        all_listings = []
+        
+        for feed_url in feeds:
+            listings = scrape_rss_feed(feed_url)
+            all_listings.extend(listings)
+            time.sleep(1)  # Be respectful
+        
+        results[item_type] = all_listings
+        print(f"  Total for {item_type}: {len(all_listings)} listings")
     
     save_results(results)
-    print(f"\nResults saved. Ready to view on dashboard.\n")
+    print(f"\n{'='*60}")
+    print(f"Scraping complete. Results saved.")
+    print(f"{'='*60}\n")
 
 # ============================================================================
 # FLASK DASHBOARD
@@ -96,10 +165,12 @@ HTML = """
         .listings { padding: 20px; }
         .listing { border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
         .listing:last-child { margin-bottom: 0; }
-        .listing-title { font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 8px; }
+        .listing-title { font-size: 16px; font-weight: bold; color: #2c3e50; margin-bottom: 8px; }
         .listing-price { font-size: 16px; color: #27ae60; font-weight: bold; margin-bottom: 8px; }
-        .listing-meta { font-size: 13px; color: #7f8c8d; margin-bottom: 8px; }
-        .listing-description { font-size: 14px; color: #555; margin-bottom: 10px; line-height: 1.4; }
+        .listing-meta { font-size: 12px; color: #7f8c8d; margin-bottom: 8px; }
+        .listing-description { font-size: 13px; color: #555; margin-bottom: 10px; line-height: 1.4; }
+        .listing-link { display: inline-block; background: #3498db; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 13px; }
+        .listing-link:hover { background: #2980b9; }
         .empty { color: #95a5a6; font-style: italic; padding: 20px; text-align: center; }
         .refresh-note { background: #ecf0f1; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-size: 13px; }
         .button { padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 10px; }
@@ -110,11 +181,11 @@ HTML = """
     <div class="container">
         <div class="header">
             <h1>🚜 Farm Equipment Search Dashboard</h1>
-            <p>Lower Mainland to Edmonton Region</p>
+            <p>Real Craigslist Listings - Lower Mainland to Edmonton</p>
             <div class="stats">
                 <div class="stat">
                     <div class="stat-number">{{ total_results }}</div>
-                    <div class="stat-label">Total Listings</div>
+                    <div class="stat-label">Real Listings</div>
                 </div>
                 <div class="stat">
                     <div class="stat-number">{{ last_updated }}</div>
@@ -124,8 +195,9 @@ HTML = """
         </div>
 
         <div class="refresh-note">
-            ℹ️ Agent runs automatically once per day at 6 AM UTC.
-            <br>Or click below to see current listings:
+            ℹ️ Real Craigslist listings from Vancouver, Calgary, and Edmonton
+            <br>Agent runs automatically once per day at 6 AM UTC
+            <br>Click listing title to view on Craigslist
             <br><button class="button" onclick="location.reload()">🔄 Refresh Dashboard</button>
         </div>
 
@@ -136,14 +208,21 @@ HTML = """
                 {% if items %}
                     {% for listing in items %}
                     <div class="listing">
-                        <div class="listing-title">{{ listing.title }}</div>
+                        <div class="listing-title">
+                            <a href="{{ listing.url }}" target="_blank" style="color: #2c3e50; text-decoration: none;">
+                                {{ listing.title }}
+                            </a>
+                        </div>
                         <div class="listing-price">{{ listing.price }}</div>
                         <div class="listing-meta">📍 {{ listing.location }}</div>
+                        {% if listing.description %}
                         <div class="listing-description">{{ listing.description }}</div>
+                        {% endif %}
+                        <a href="{{ listing.url }}" target="_blank" class="listing-link">View on Craigslist →</a>
                     </div>
                     {% endfor %}
                 {% else %}
-                    <div class="empty">No listings found yet.</div>
+                    <div class="empty">No listings found yet. Check back later or refresh the page.</div>
                 {% endif %}
             </div>
         </div>
@@ -170,14 +249,13 @@ def dashboard():
     
     sections = [
         ("24-40 HP Tractors with Front Loader", data.get("tractor", []), "🚜"),
-        ("36-40' Bunk House Trailers (2020+)", data.get("bunk_trailer", []), "🏠"),
-        ("Scissor Hoists (7,000 lb capacity)", data.get("scissor_hoist", []), "🔧"),
+        ("36-40' Bunk House Trailers", data.get("bunk_trailer", []), "🏠"),
+        ("Scissor Hoists (7,000 lb)", data.get("scissor_hoist", []), "🔧"),
         ("2-Post Vehicle Hoists (10,000-12,000 lb)", data.get("two_post_hoist", []), "🚙"),
     ]
     
     return render_template_string(
         HTML,
-        results=data,
         total_results=total,
         last_updated=last_updated_display,
         sections=sections
@@ -197,16 +275,16 @@ def run_scheduler():
             target += timedelta(days=1)
         
         wait_seconds = (target - now).total_seconds()
-        print(f"Next run scheduled in {wait_seconds/3600:.1f} hours")
+        print(f"Next scrape in {wait_seconds/3600:.1f} hours")
         
         time.sleep(wait_seconds)
         run_agent()
 
 if __name__ == "__main__":
-    # Run agent once on startup
+    # Scrape once on startup
     run_agent()
     
-    # Start scheduler in background
+    # Start daily scheduler
     scheduler_thread = Thread(target=run_scheduler, daemon=True)
     scheduler_thread.start()
     
