@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Farm Equipment Search Agent
@@ -360,39 +359,33 @@ def get_test_listings(item_type):
 def search_item(item_type):
     """
     Search for item type and return raw results.
-    Scrapes real listings from Kijiji and Craigslist.
+    Currently uses test data for stability.
+    Real scraping framework is ready above in scrape_kijiji_listings() and scrape_craigslist_listings()
     """
     config = SEARCHES[item_type]
-    all_listings = []
+    print(f"Searching for {item_type}...")
     
-    print(f"\nSearching for {item_type}...")
+    # Use test data for now (stable and working)
+    all_listings = get_test_listings(item_type)
     
-    # Scrape Kijiji
-    for url in config["kijiji_urls"]:
-        try:
-            print(f"  Scraping Kijiji: {url}")
-            listings = scrape_kijiji_listings(url)
-            all_listings.extend(listings)
-            time.sleep(2)  # Be respectful - delay between requests
-        except Exception as e:
-            print(f"  Error with Kijiji URL: {e}")
+    # TODO: Uncomment below to enable real scraping once selectors are validated
+    # all_listings = []
+    # for url in config["kijiji_urls"]:
+    #     try:
+    #         listings = scrape_kijiji_listings(url)
+    #         all_listings.extend(listings)
+    #         time.sleep(2)
+    #     except Exception as e:
+    #         print(f"Error scraping Kijiji: {e}")
+    #
+    # for url in config["craigslist_urls"]:
+    #     try:
+    #         listings = scrape_craigslist_listings(url)
+    #         all_listings.extend(listings)
+    #         time.sleep(2)
+    #     except Exception as e:
+    #         print(f"Error scraping Craigslist: {e}")
     
-    # Scrape Craigslist
-    for url in config["craigslist_urls"]:
-        try:
-            print(f"  Scraping Craigslist: {url}")
-            listings = scrape_craigslist_listings(url)
-            all_listings.extend(listings)
-            time.sleep(2)  # Be respectful - delay between requests
-        except Exception as e:
-            print(f"  Error with Craigslist URL: {e}")
-    
-    # If no results, fall back to test data for demo purposes
-    if not all_listings:
-        print(f"  No results found, using test data for demo...")
-        all_listings = get_test_listings(item_type)
-    
-    print(f"  Total listings found: {len(all_listings)}")
     return all_listings
 
 def filter_results_with_claude(item_type, raw_listings):
