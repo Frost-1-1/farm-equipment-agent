@@ -194,7 +194,31 @@ HTML = """
 
         <div class="note">
             Scrapes real Craigslist listings from Vancouver, Calgary, Edmonton. Updated daily at 6 AM UTC.
+            <br><button onclick="scrapeNow()" style="margin-top: 10px; padding: 8px 16px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer;">🔄 Check Now</button>
+            <span id="status" style="margin-left: 10px; font-size: 12px;"></span>
         </div>
+
+        <script>
+        function scrapeNow() {
+            const btn = event.target;
+            const status = document.getElementById('status');
+            btn.disabled = true;
+            btn.textContent = '⏳ Checking...';
+            status.textContent = '';
+            
+            fetch('/scrape-now', {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                status.textContent = '✓ Done! Refreshing...';
+                setTimeout(() => location.reload(), 1500);
+            })
+            .catch(err => {
+                status.textContent = '✗ Error';
+                btn.disabled = false;
+                btn.textContent = '🔄 Check Now';
+            });
+        }
+        </script>
 
         {% for title, items, emoji in sections %}
         <div class="section">
@@ -244,6 +268,12 @@ def index():
     ]
     
     return render_template_string(HTML, total=total, updated=updated, sections=sections)
+
+@app.route('/scrape-now', methods=['POST'])
+def scrape_now():
+    """Manually trigger scrape"""
+    run_agent()
+    return {"status": "complete"}
 
 def scheduler():
     """Run at 6 AM daily"""
