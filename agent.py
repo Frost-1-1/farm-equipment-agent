@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """
-Craigslist RSS Scraper - Real Equipment Listings
-Pulls actual listings from Craigslist RSS feeds
-Shows real prices and links
-Runs daily at 6 AM
+Craigslist RSS Scraper - Simple Version
+Uses only Flask + requests (built-in XML parsing)
 """
 
 import os
 import json
-import re
-import feedparser
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string
 from threading import Thread
 import time
+import xml.etree.ElementTree as ET
+try:
+    from urllib.request import urlopen
+except ImportError:
+    from urllib2 import urlopen
 
 RESULTS_FILE = "farm_results.json"
 
-# Craigslist RSS URLs for equipment searches
-CRAIGSLIST_FEEDS = {
+# Craigslist RSS URLs
+FEEDS = {
     "tractor": [
         "https://vancouver.craigslist.org/search/gra?query=tractor+front+loader&format=rss",
         "https://calgary.craigslist.org/search/gra?query=tractor+front+loader&format=rss",
@@ -41,45 +42,52 @@ CRAIGSLIST_FEEDS = {
     ]
 }
 
-# ============================================================================
-# RSS SCRAPING
-# ============================================================================
-
-def scrape_rss_feed(url):
-    """Parse Craigslist RSS feed and extract listings"""
+def scrape_feed(url):
+    """Parse RSS feed - minimal dependencies"""
     listings = []
     try:
-        feed = feedparser.parse(url)
+        response = urlopen(url, timeout=10)
+        tree = ET.parse(response)
+        root = tree.getroot()
         
-        for entry in feed.entries[:15]:  # Get up to 15 listings per feed
+        # Get location from URL
+        if 'vancouver' in url:
+            location = "Vancouver, BC"
+        elif 'calgary' in url:
+            location = "Calgary, AB"
+        elif 'edmonton' in url:
+            location = "Edmonton, AB"
+        else:
+            location = "Craigslist"
+        
+        # Parse items
+        for item in root.findall('.//item')[:15]:
             try:
-                title = entry.get('title', 'No title')
-                link = entry.get('link', '')
-                description = entry.get('description', '')
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                desc_elem = item.find('description')
                 
-                # Extract price from description (usually in format $XXX)
+                if title_elem is None or link_elem is None:
+                    continue
+                
+                title = title_elem.text or "No title"
+                link = link_elem.text or ""
+                description = desc_elem.text or "" if desc_elem is not None else ""
+                
+                # Extract price
                 price = "Price not listed"
                 if '$' in description:
-                    # Get the price string
                     parts = description.split('$')
                     if len(parts) > 1:
-                        price_part = parts[1].split('<')[0].strip()
-                        price = f"${price_part}"
+                        price_str = parts[1].split()[0]
+                        if price_str.replace(',', '').isdigit():
+                            price = f"${price_str}"
                 
-                # Extract location from description (usually at end)
-                location = "Craigslist"
-                if url.find('vancouver') > 0:
-                    location = "Vancouver, BC"
-                elif url.find('calgary') > 0:
-                    location = "Calgary, AB"
-                elif url.find('edmonton') > 0:
-                    location = "Edmonton, AB"
-                
-                # Clean description (remove HTML tags)
-                clean_desc = description.replace('<br>', ' ').replace('<p>', '').replace('</p>', '')
-                # Remove HTML tags
-                clean_desc = re.sub('<[^<]+?>', '', clean_desc).strip()
-                clean_desc = clean_desc[:200]  # First 200 chars
+                # Clean description
+                clean_desc = description.replace('<br>', ' ')
+                for tag in ['<p>', '</p>', '<br/>', '&nbsp;']:
+                    clean_desc = clean_desc.replace(tag, '')
+                clean_desc = clean_desc[:150].strip()
                 
                 listings.append({
                     'title': title,
@@ -89,18 +97,13 @@ def scrape_rss_feed(url):
                     'location': location
                 })
             except Exception as e:
-                print(f"  Error parsing entry: {e}")
                 continue
         
-        print(f"  Found {len(listings)} listings from {url.split('?')[0].split('/')[-1]}")
+        print(f"  ✓ {len(listings)} listings from {location}")
     except Exception as e:
-        print(f"  Error fetching RSS: {e}")
+        print(f"  ✗ Error: {e}")
     
     return listings
-
-# ============================================================================
-# FILE OPERATIONS
-# ============================================================================
 
 def load_results():
     if os.path.exists(RESULTS_FILE):
@@ -113,33 +116,28 @@ def save_results(data):
         json.dump(data, f, indent=2, default=str)
 
 def run_agent():
-    """Scrape all Craigslist feeds"""
+    """Scrape all feeds"""
     print(f"\n{'='*60}")
-    print(f"Craigslist Scraper - Run at {datetime.now()}")
-    print(f"{'='*60}\n")
+    print(f"Scraping at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'='*60}")
     
     results = load_results()
     results["last_updated"] = datetime.now().isoformat()
     
-    for item_type, feeds in CRAIGSLIST_FEEDS.items():
-        print(f"\nScraping {item_type}...")
+    for item_type, feed_urls in FEEDS.items():
+        print(f"\n{item_type}:")
         all_listings = []
-        
-        for feed_url in feeds:
-            listings = scrape_rss_feed(feed_url)
+        for url in feed_urls:
+            listings = scrape_feed(url)
             all_listings.extend(listings)
-            time.sleep(1)  # Be respectful
-        
+            time.sleep(0.5)
         results[item_type] = all_listings
-        print(f"  Total for {item_type}: {len(all_listings)} listings")
     
     save_results(results)
-    print(f"\n{'='*60}")
-    print(f"Scraping complete. Results saved.")
-    print(f"{'='*60}\n")
+    print(f"\n{'='*60}\nDone.\n")
 
 # ============================================================================
-# FLASK DASHBOARD
+# DASHBOARD
 # ============================================================================
 
 app = Flask(__name__)
@@ -148,81 +146,76 @@ HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Farm Equipment Search Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Farm Equipment Search</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
         .container { max-width: 1200px; margin: 0 auto; }
         .header { background: #2c3e50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; }
         .header h1 { font-size: 28px; margin-bottom: 10px; }
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; }
+        .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 15px; }
         .stat { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 6px; }
         .stat-number { font-size: 24px; font-weight: bold; }
         .stat-label { font-size: 12px; opacity: 0.8; margin-top: 5px; }
-        .section { background: white; border-radius: 8px; margin-bottom: 25px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .section { background: white; border-radius: 8px; margin-bottom: 25px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; }
         .section-title { background: #34495e; color: white; padding: 15px 20px; font-size: 18px; font-weight: bold; }
         .listings { padding: 20px; }
         .listing { border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
-        .listing:last-child { margin-bottom: 0; }
         .listing-title { font-size: 16px; font-weight: bold; color: #2c3e50; margin-bottom: 8px; }
+        .listing-title a { color: #2c3e50; text-decoration: none; }
+        .listing-title a:hover { color: #3498db; }
         .listing-price { font-size: 16px; color: #27ae60; font-weight: bold; margin-bottom: 8px; }
         .listing-meta { font-size: 12px; color: #7f8c8d; margin-bottom: 8px; }
-        .listing-description { font-size: 13px; color: #555; margin-bottom: 10px; line-height: 1.4; }
-        .listing-link { display: inline-block; background: #3498db; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 13px; }
+        .listing-desc { font-size: 13px; color: #555; margin-bottom: 10px; line-height: 1.4; }
+        .listing-link { display: inline-block; background: #3498db; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; }
         .listing-link:hover { background: #2980b9; }
-        .empty { color: #95a5a6; font-style: italic; padding: 20px; text-align: center; }
-        .refresh-note { background: #ecf0f1; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-size: 13px; }
-        .button { padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 10px; }
-        .button:hover { background: #229954; }
+        .empty { color: #95a5a6; text-align: center; padding: 40px 20px; }
+        .note { background: #ecf0f1; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-size: 13px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚜 Farm Equipment Search Dashboard</h1>
-            <p>Real Craigslist Listings - Lower Mainland to Edmonton</p>
+            <h1>🚜 Farm Equipment Search</h1>
+            <p>Real Craigslist Listings - BC & Alberta</p>
             <div class="stats">
                 <div class="stat">
-                    <div class="stat-number">{{ total_results }}</div>
-                    <div class="stat-label">Real Listings</div>
+                    <div class="stat-number">{{ total }}</div>
+                    <div class="stat-label">Listings Found</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-number">{{ last_updated }}</div>
+                    <div class="stat-number">{{ updated }}</div>
                     <div class="stat-label">Last Updated</div>
                 </div>
             </div>
         </div>
 
-        <div class="refresh-note">
-            ℹ️ Real Craigslist listings from Vancouver, Calgary, and Edmonton
-            <br>Agent runs automatically once per day at 6 AM UTC
-            <br>Click listing title to view on Craigslist
-            <br><button class="button" onclick="location.reload()">🔄 Refresh Dashboard</button>
+        <div class="note">
+            Scrapes real Craigslist listings from Vancouver, Calgary, Edmonton. Updated daily at 6 AM UTC.
         </div>
 
-        {% for section_title, items, emoji in sections %}
+        {% for title, items, emoji in sections %}
         <div class="section">
-            <div class="section-title">{{ emoji }} {{ section_title }}</div>
+            <div class="section-title">{{ emoji }} {{ title }}</div>
             <div class="listings">
                 {% if items %}
-                    {% for listing in items %}
+                    {% for item in items %}
                     <div class="listing">
                         <div class="listing-title">
-                            <a href="{{ listing.url }}" target="_blank" style="color: #2c3e50; text-decoration: none;">
-                                {{ listing.title }}
-                            </a>
+                            <a href="{{ item.url }}" target="_blank">{{ item.title }}</a>
                         </div>
-                        <div class="listing-price">{{ listing.price }}</div>
-                        <div class="listing-meta">📍 {{ listing.location }}</div>
-                        {% if listing.description %}
-                        <div class="listing-description">{{ listing.description }}</div>
+                        <div class="listing-price">{{ item.price }}</div>
+                        <div class="listing-meta">📍 {{ item.location }}</div>
+                        {% if item.description %}
+                        <div class="listing-desc">{{ item.description }}</div>
                         {% endif %}
-                        <a href="{{ listing.url }}" target="_blank" class="listing-link">View on Craigslist →</a>
+                        <a href="{{ item.url }}" target="_blank" class="listing-link">View →</a>
                     </div>
                     {% endfor %}
                 {% else %}
-                    <div class="empty">No listings found yet. Check back later or refresh the page.</div>
+                    <div class="empty">No listings found. Check back later.</div>
                 {% endif %}
             </div>
         </div>
@@ -234,60 +227,39 @@ HTML = """
 """
 
 @app.route('/')
-@app.route('/dashboard')
-def dashboard():
+def index():
     data = load_results()
-    
     total = sum(len(data.get(k, [])) for k in ["tractor", "bunk_trailer", "scissor_hoist", "two_post_hoist"])
     
-    last_updated = data.get("last_updated")
-    if last_updated:
-        dt = datetime.fromisoformat(last_updated)
-        last_updated_display = dt.strftime("%b %d, %I:%M %p")
-    else:
-        last_updated_display = "Never"
+    updated = "Never"
+    if data.get("last_updated"):
+        dt = datetime.fromisoformat(data["last_updated"])
+        updated = dt.strftime("%b %d %I:%M %p")
     
     sections = [
         ("24-40 HP Tractors with Front Loader", data.get("tractor", []), "🚜"),
-        ("36-40' Bunk House Trailers", data.get("bunk_trailer", []), "🏠"),
-        ("Scissor Hoists (7,000 lb)", data.get("scissor_hoist", []), "🔧"),
+        ("36-40' Bunk House Trailers (2020+)", data.get("bunk_trailer", []), "🏠"),
+        ("Scissor Hoists (7,000 lb capacity)", data.get("scissor_hoist", []), "🔧"),
         ("2-Post Vehicle Hoists (10,000-12,000 lb)", data.get("two_post_hoist", []), "🚙"),
     ]
     
-    return render_template_string(
-        HTML,
-        total_results=total,
-        last_updated=last_updated_display,
-        sections=sections
-    )
+    return render_template_string(HTML, total=total, updated=updated, sections=sections)
 
-# ============================================================================
-# SCHEDULER & MAIN
-# ============================================================================
-
-def run_scheduler():
-    """Run agent every day at 6 AM"""
+def scheduler():
+    """Run at 6 AM daily"""
     while True:
         now = datetime.now()
         target = now.replace(hour=6, minute=0, second=0, microsecond=0)
-        
         if now > target:
             target += timedelta(days=1)
-        
-        wait_seconds = (target - now).total_seconds()
-        print(f"Next scrape in {wait_seconds/3600:.1f} hours")
-        
-        time.sleep(wait_seconds)
+        wait = (target - now).total_seconds()
+        time.sleep(wait)
         run_agent()
 
 if __name__ == "__main__":
-    # Scrape once on startup
-    run_agent()
-    
-    # Start daily scheduler
-    scheduler_thread = Thread(target=run_scheduler, daemon=True)
-    scheduler_thread.start()
-    
-    # Start dashboard
-    print("Dashboard live at: http://localhost:5000")
+    # Don't scrape on startup - just start the dashboard
+    # Scheduler will handle daily scrapes
+    Thread(target=scheduler, daemon=True).start()
+    print("Dashboard starting at http://localhost:5000")
+    print("Scraping scheduled for 6 AM daily")
     app.run(host="0.0.0.0", port=5000, debug=False)
